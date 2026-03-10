@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 
 # --- 配置区域 ---
 OUTPUT_FILE = "filtered_feed.xml"  # 输出文件
+OUTPUT_FILE_24H = "24hours.xml"    # 最近24小时文章输出文件
 MAX_ITEMS = 10000                    # RSS中保留的最大条目数（滚动窗口）
 JOURNALS_FILE = 'journals.dat'
 KEYWORDS_FILE = 'keywords.dat'
@@ -27,7 +28,7 @@ def load_config(filename, env_var_name=None):
         if '\n' in content:
             return [line.strip() for line in content.split('\n') if line.strip()]
         else:
-            return [line.strip() for line in content.split(';') if line.strip()]
+            return [line.strip() for line in content.split(';') if line.strip()] 
             
     # 2. 尝试读取本地文件
     if os.path.exists(filename):
@@ -62,7 +63,7 @@ def parse_rss(rss_url, retries=3):
                     'title': entry.get('title', ''),
                     'link': entry.get('link', ''),
                     'pub_date': pub_date,
-                    'summary': entry.get('summary', entry.get('description', '')),
+                    'summary': entry.get('summary', entry.get('description', ''),
                     'journal': journal_title,
                     'id': entry.get('id', entry.get('link', '')) # ID 用于去重
                 })
@@ -95,7 +96,7 @@ def get_existing_items():
                 'pub_date': pub_date,
                 'summary': entry.get('summary', ''),
                 'journal': entry.get('author', ''), # 我们在生成时把 journal 存入了 author 字段
-                'id': entry.get('id', entry.get('link', '')),
+                'id': entry.get('id', entry.get('link', '')), 
                 'is_old': True # 标记为旧数据，不需要再次关键词匹配
             })
         return entries
@@ -161,6 +162,48 @@ def generate_rss_xml(items):
         f.write(feed.rss())
     print(f"Successfully generated {OUTPUT_FILE} with {len(rss_items)} items.")
 
+def generate_24h_rss_xml(items):
+    """从所有条目中筛选出最近24小时内发布的文章，生成单独的 RSS XML 文件"""
+    now = datetime.datetime.now()
+    cutoff_time = now - datetime.timedelta(hours=24)
+    
+    # 筛选最近24小时内的文章
+    recent_items = [item for item in items if item['pub_date'] >= cutoff_time]
+    
+    # 按时间倒序排列（最新的在最前）
+    recent_items.sort(key=lambda x: x['pub_date'], reverse=True)
+    
+    rss_items = []
+    for item in recent_items:
+        # 如果是旧数据，标题可能已经是 "[Journal] Title" 格式，需要避免重复添加前缀
+        title = item['title']
+        if not item.get('is_old', False):
+            # 新数据，添加期刊前缀
+            title = f"[{item['journal']}] {item['title']}"
+            
+        rss_item = Item(
+            title = title,
+            link = item['link'],
+            description = item['summary'],
+            author = item['journal'],
+            guid = Guid(item['id']),
+            pubDate = item['pub_date']
+        )
+        rss_items.append(rss_item)
+
+    feed = Feed(
+        title = "My Customized Papers - Last 24 Hours",
+        link = "https://github.com/your_username/your_repo",
+        description = "Research papers from the last 24 hours, filtered by keywords",
+        language = "en-US",
+        lastBuildDate = datetime.datetime.now(),
+        items = rss_items
+    )
+
+    with open(OUTPUT_FILE_24H, "w", encoding="utf-8") as f:
+        f.write(feed.rss())
+    print(f"Successfully generated {OUTPUT_FILE_24H} with {len(rss_items)} items (last 24 hours).")
+
 def main():
     # 1. 读取配置
     rss_urls = load_config('journals.dat', 'RSS_JOURNALS') 
@@ -196,8 +239,11 @@ def main():
 
     print(f"Added {new_count} new entries. Total entries before limit: {len(all_entries)}")
     
-    # 4. 生成新文件 (包含排序和截断)
+    # 4. 生成完整的 RSS 文件 (包含排序和截断)
     generate_rss_xml(all_entries)
+    
+    # 5. 筛选最近24小时的文章，生成 24hours.xml
+    generate_24h_rss_xml(all_entries)
 
 if __name__ == '__main__':
     main()
