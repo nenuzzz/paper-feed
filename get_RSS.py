@@ -63,9 +63,9 @@ def parse_rss(rss_url, retries=3):
                     'title': entry.get('title', ''),
                     'link': entry.get('link', ''),
                     'pub_date': pub_date,
-                    'summary': entry.get('summary', entry.get('description', ''),
+                    'summary': entry.get('summary', entry.get('description', '')),
                     'journal': journal_title,
-                    'id': entry.get('id', entry.get('link', '')) # ID 用于去重
+                    'id': entry.get('id', entry.get('link', ''))
                 })
             return entries
         except Exception as e:
@@ -80,24 +80,20 @@ def get_existing_items():
     
     print(f"Loading existing items from {OUTPUT_FILE}...")
     try:
-        # feedparser 也可以解析本地 XML 文件
         feed = feedparser.parse(OUTPUT_FILE)
         entries = []
         for entry in feed.entries:
-            # 恢复 datetime 对象
             pub_struct = entry.get('published_parsed')
             pub_date = convert_struct_time_to_datetime(pub_struct)
             
-            # 注意：生成的 XML 标题通常是 "[Journal] Title"，这里我们需要尽量保持原样
-            # 或者为了简单起见，我们直接存储读取到的内容
             entries.append({
-                'title': entry.get('title', ''), # 这里标题已经包含 [Journal] 前缀了
+                'title': entry.get('title', ''),
                 'link': entry.get('link', ''),
                 'pub_date': pub_date,
                 'summary': entry.get('summary', ''),
-                'journal': entry.get('author', ''), # 我们在生成时把 journal 存入了 author 字段
-                'id': entry.get('id', entry.get('link', '')), 
-                'is_old': True # 标记为旧数据，不需要再次关键词匹配
+                'journal': entry.get('author', ''),
+                'id': entry.get('id', entry.get('link', '')),
+                'is_old': True
             })
         return entries
     except Exception as e:
@@ -106,14 +102,12 @@ def get_existing_items():
 
 def match_entry(entry, queries):
     """关键词匹配"""
-    # 构造待搜索文本
     text_to_search = (entry['title'] + " " + entry['summary']).lower()
     
     for query in queries:
         keywords = [k.strip().lower() for k in query.split('AND')]
         match = True
         for keyword in keywords:
-            # 使用简单的字符串包含判断，比正则更快，且对科研关键词通常足够
             if keyword not in text_to_search:
                 match = False
                 break
@@ -125,25 +119,20 @@ def generate_rss_xml(items):
     """生成 RSS 2.0 XML 文件"""
     rss_items = []
     
-    # 按时间倒序排列（最新的在最前）
-    # 确保所有 item 都有 pub_date 且是 datetime 对象
     items.sort(key=lambda x: x['pub_date'], reverse=True)
     
-    # 截取最新的 MAX_ITEMS 条
     items = items[:MAX_ITEMS]
     
     for item in items:
-        # 如果是旧数据，标题可能已经是 "[Journal] Title" 格式，需要避免重复添加前缀
         title = item['title']
         if not item.get('is_old', False):
-            # 新数据，添加期刊前缀
-            title = f"[{item['journal']}] {item['title']}"
+            title = f"[{item['journal']}] {item['title']}" 
             
         rss_item = Item(
             title = title,
             link = item['link'],
             description = item['summary'],
-            author = item['journal'], # 借用 author 字段存储期刊名
+            author = item['journal'],
             guid = Guid(item['id']),
             pubDate = item['pub_date']
         )
@@ -175,11 +164,9 @@ def generate_24h_rss_xml(items):
     
     rss_items = []
     for item in recent_items:
-        # 如果是旧数据，标题可能已经是 "[Journal] Title" 格式，需要避免重复添加前缀
         title = item['title']
         if not item.get('is_old', False):
-            # 新数据，添加期刊前缀
-            title = f"[{item['journal']}] {item['title']}"
+            title = f"[{item['journal']}] {item['title']}" 
             
         rss_item = Item(
             title = title,
@@ -215,7 +202,6 @@ def main():
 
     # 2. 读取旧数据（核心去重策略：保留历史）
     existing_entries = get_existing_items()
-    # 创建一个已有 ID 的集合，用于快速查重
     seen_ids = set(entry['id'] for entry in existing_entries)
     
     all_entries = existing_entries.copy()
@@ -226,11 +212,9 @@ def main():
     for url in rss_urls:
         fetched_entries = parse_rss(url)
         for entry in fetched_entries:
-            # 查重：如果 ID 已经在旧数据里，直接跳过
             if entry['id'] in seen_ids:
                 continue
             
-            # 关键词匹配
             if match_entry(entry, queries):
                 all_entries.append(entry)
                 seen_ids.add(entry['id'])
